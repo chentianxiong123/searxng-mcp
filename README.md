@@ -1,61 +1,101 @@
 # SearXNG MCP Server
 
-为 AI 提供搜索能力的 MCP（Model Context Protocol）服务器
+为 AI 提供搜索能力的 MCP（Model Context Protocol）服务器，实现 MCP 2025-03-26 Streamable HTTP 传输。
 
 ## 功能
 
 - **search_web** - 通用网页搜索（中英文）
-- **search_science** - 科研论文搜索（arXiv, Crossref）
-- **search_technical** - 技术文档搜索（StackOverflow, PyPI 等）
+- **search_science** - 科研论文搜索（arXiv, Crossref, EuropePMC）
+- **search_technical** - 技术文档搜索（StackOverflow, PyPI, crates.io 等）
 - **get_engine_list** - 获取可用搜索引擎列表
-- **engines://available** - 查看可用引擎（资源）
-- **help://usage** - 使用帮助（资源）
+
+## 特性
+
+- ✅ 标准 MCP 2025-03-26 Streamable HTTP 传输
+- ✅ 单一 `/mcp` 端点，兼容标准 MCP 客户端
+- ✅ 会话管理（Mcp-Session-Id）
+- ✅ 速率限制与并发控制
+- ✅ Origin 验证（防 DNS 重绑定攻击）
+- ✅ 纯 Python 实现，无 MCP SDK 依赖
+- ✅ Docker 支持
 
 ## 快速开始
 
-### 1. 安装依赖
+### 方式 1：直接运行
 
 ```bash
-cd Z:\searxng-mcp
+cd searxng-mcp
 pip install -r requirements.txt
+python server.py --http
 ```
 
-### 2. 配置环境变量（可选）
+### 方式 2：Docker
 
 ```bash
-# 默认使用 hi-box 上的 SearXNG
-set SEARXNG_URL=http://192.168.31.82:8080
-
-# 或者指定其他地址
-set SEARXNG_URL=http://your-ip:8080
+docker-compose up -d
 ```
 
-### 3. 运行服务器
+### 环境变量配置
 
 ```bash
-# 开发模式（带 MCP Inspector）
-mcp dev server.py
+# SearXNG 服务器地址（默认 http://192.168.31.82:8080）
+export SEARXNG_URL=http://192.168.31.82:8080
 
-# 生产模式（stdio）
-python server.py
+# 监听地址和端口
+export MCP_HOST=0.0.0.0
+export MCP_PORT=3000
 
-# 生产模式（HTTP）
-mcp run server.py --transport http --port 3000
+# 超时和重试
+export SEARXNG_TIMEOUT=15
+export MAX_RETRIES=3
+
+# 并发控制
+export MAX_CONCURRENT=10
+
+# 允许的 Origin（可选）
+export ALLOWED_ORIGINS=http://localhost,http://127.0.0.1
+```
+
+## 在 omp 中使用
+
+编辑 `~/.omp/agent/mcp.json`：
+
+```json
+{
+  "$schema": "https://raw.githubusercontent.com/can1357/oh-my-pi/main/packages/coding-agent/src/config/mcp-schema.json",
+  "mcpServers": {
+    "searxng": {
+      "type": "http",
+      "url": "http://192.168.31.82:3000/mcp"
+    }
+  }
+}
 ```
 
 ## 在 Claude Desktop 中使用
 
-在 `claude_desktop_config.json` 中添加：
+编辑 `claude_desktop_config.json`：
 
 ```json
 {
   "mcpServers": {
     "searxng": {
-      "command": "python",
-      "args": ["Z:/searxng-mcp/server.py"],
-      "env": {
-        "SEARXNG_URL": "http://192.168.31.82:8080"
-      }
+      "url": "http://192.168.31.82:3000/mcp"
+    }
+  }
+}
+```
+
+## 在 VS Code 中使用
+
+编辑 `.vscode/mcp.json` 或用户配置：
+
+```json
+{
+  "mcpServers": {
+    "searxng": {
+      "type": "http",
+      "url": "http://192.168.31.82:3000/mcp"
     }
   }
 }
@@ -65,7 +105,7 @@ mcp run server.py --transport http --port 3000
 
 ### 1. search_web - 通用网页搜索
 
-```python
+```json
 {
   "query": "人工智能",
   "language": "zh-CN",
@@ -76,7 +116,7 @@ mcp run server.py --transport http --port 3000
 
 ### 2. search_science - 科研论文搜索
 
-```python
+```json
 {
   "query": "machine learning",
   "engine": "arxiv",
@@ -86,7 +126,7 @@ mcp run server.py --transport http --port 3000
 
 ### 3. search_technical - 技术文档搜索
 
-```python
+```json
 {
   "query": "python list",
   "engine": "stackoverflow",
@@ -96,10 +136,8 @@ mcp run server.py --transport http --port 3000
 
 ### 4. get_engine_list - 获取可用引擎
 
-```python
-{
-  # 无参数
-}
+```json
+{}
 ```
 
 ## 可用搜索引擎
@@ -182,6 +220,40 @@ mcp run server.py --transport http --port 3000
 }
 ```
 
+## API 测试
+
+### 初始化
+
+```bash
+curl -X POST http://localhost:3000/mcp \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json" \
+  -H "MCP-Protocol-Version: 2025-03-26" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26"}}'
+```
+
+### 获取工具列表
+
+```bash
+curl -X POST http://localhost:3000/mcp \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json" \
+  -H "MCP-Protocol-Version: 2025-03-26" \
+  -H "Mcp-Session-Id: <session-id>" \
+  -d '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}'
+```
+
+### 调用工具
+
+```bash
+curl -X POST http://localhost:3000/mcp \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json" \
+  -H "MCP-Protocol-Version: 2025-03-26" \
+  -H "Mcp-Session-Id: <session-id>" \
+  -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"search_web","arguments":{"query":"test","num_results":5}}}'
+```
+
 ## 开发
 
 ### 项目结构
@@ -191,17 +263,22 @@ searxng-mcp/
 ├── server.py           # MCP 服务器主文件
 ├── requirements.txt    # Python 依赖
 ├── README.md           # 本文档
+├── Dockerfile          # Docker 构建文件
+├── docker-compose.yml  # Docker Compose 配置
+├── LICENSE             # MIT 许可证
 └── examples/           # 使用示例
 ```
 
-### 开发模式
+### 测试服务器
 
 ```bash
-# 启动开发模式
-mcp dev server.py
+# 启动服务器
+python server.py --http
 
-# 打开 MCP Inspector
-# 在浏览器中测试工具和资源
+# 检查服务器状态
+curl http://localhost:3000/mcp -X POST \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26"}}'
 ```
 
 ## 故障排除
@@ -213,7 +290,7 @@ mcp dev server.py
 curl http://192.168.31.82:8080/
 
 # 检查环境变量
-echo %SEARXNG_URL%
+echo $SEARXNG_URL
 ```
 
 ### 搜索无结果
@@ -239,6 +316,7 @@ MIT License
 
 ## 版本
 
+- v1.1.0 - 支持 Streamable HTTP 传输
 - v1.0.0 - 初始版本
 - 支持 SearXNG 4.0.0
-- 支持 MCP Python SDK 1.0+
+- 支持 MCP 2025-03-26 协议
